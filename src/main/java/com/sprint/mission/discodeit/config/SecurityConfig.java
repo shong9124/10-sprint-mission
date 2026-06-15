@@ -67,6 +67,9 @@ public class SecurityConfig {
 
                         // 프론트 빌드 파일 경로
                         .requestMatchers("/assets/**").permitAll()
+                        .requestMatchers("/favicon.ico").permitAll()
+
+                        .requestMatchers("/ws", "/ws/**").permitAll()
 
                         .requestMatchers("/api/auth/csrf-token").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/users").permitAll()      // 회원가입 경로만 허용
