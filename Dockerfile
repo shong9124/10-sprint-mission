@@ -34,6 +34,6 @@ ENV JVM_OPTS=""
 # build stage에서 생성된 jar 파일 복사
 COPY --from=build /app/build/libs/*.jar ${PROJECT_NAME}-${PROJECT_VERSION}.jar
 
-EXPOSE 80
+EXPOSE 8080
 
-CMD ["sh", "-c", "java ${JVM_OPTS} -Dserver.port=80 -jar ${PROJECT_NAME}-${PROJECT_VERSION}.jar"]
+CMD ["sh", "-c", "java ${JVM_OPTS} -Dserver.port=8080 -jar ${PROJECT_NAME}-${PROJECT_VERSION}.jar"]

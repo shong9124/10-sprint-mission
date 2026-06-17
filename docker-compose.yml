@@ -1,39 +1,79 @@
 services:
-  app:
-    build: .                 # 동일 폴더의 Dockerfile로 이미지 빌드
+  nginx:
+    image: nginx:1.27-alpine
     ports:
-      - '8081:80'
+      - "3000:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./src/main/resources/static:/usr/share/nginx/html:ro
+    depends_on:
+      - backend
+
+  backend:
+    build: .
+    expose:
+      - "8080"
     env_file:
       - discodeit.env
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      DB_URL: jdbc:postgresql://db:5432/${DB_NAME}
-
-      # 여기부터 AWS 설정
-      AWS_CREDENTIALS_ACCESS_KEY: ${AWS_ACCESS_KEY_ID}
-      AWS_CREDENTIALS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_REGION: ${AWS_REGION}
-      AWS_S3_BUCKET: ${AWS_BUCKET_NAME}
-
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/discodeit
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP_SERVERS: broker:29092
+      JWT_SECRET_KEY: qwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwerqwer
     depends_on:
       - db
+      - redis
+      - broker
     volumes:
-      - app-storage:/app/.discodeit.storage
+      - backend-storage:/app/.discodeit.storage
 
   db:
     image: postgres:16
-    ports:
-      - "5433:5432"
-    env_file:
-      - discodeit.env
+    expose:
+      - "5432"
     environment:
-      POSTGRES_USER: ${DB_USERNAME}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: discodeit
     volumes:
-      - db-data:/var/lib/postgresql/data      # PostgreSQL 데이터 저장소를 컨테이너 밖에 보존하는 설정
-      - ./src/main/resources/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - db-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7.2-alpine
+    expose:
+      - "6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+
+  broker:
+    image: apache/kafka:latest
+    hostname: broker
+    expose:
+      - "29092"
+      - "29093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:29093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
 
 volumes:
-  db-data: {}
-  app-storage: {}
+  backend-storage:
+  db-data:
+  redis-data:

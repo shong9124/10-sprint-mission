@@ -221,3 +221,125 @@ public class SseMessageRepository {
 - 클라이언트 재연결 시 `Last-Event-ID` 기준으로 유실된 이벤트를 복원할 수 있다.
 - 만료되거나 전송 실패한 `SseEmitter` 연결은 저장소에서 제거된다.
 - 알림, 파일 업로드 상태, 채널, 사용자 변경 사항이 폴링 없이 SSE 이벤트로 클라이언트에 전달된다.
+
+## Docker Compose 기반 배포 아키텍처
+
+Docker Compose를 이용해 프론트엔드 정적 리소스, 백엔드, 데이터베이스, Redis, Kafka를 하나의 내부 네트워크에서 실행한다.
+
+외부에서 직접 접근 가능한 컨테이너는 Nginx Reverse Proxy 하나로 제한한다.
+
+## 컨테이너 구성
+
+### Nginx Reverse Proxy
+
+Nginx는 외부 요청의 단일 진입점으로 동작한다.
+
+요구사항:
+
+- 사용자는 브라우저에서 `http://localhost:3000`으로 접근한다.
+- Nginx 컨테이너만 외부 포트를 노출한다.
+- Nginx는 `3000:80` 포트 매핑을 사용한다.
+- `/api/*` 요청은 Spring Boot Backend 컨테이너로 프록시한다.
+- `/ws/*` 요청은 Spring Boot Backend 컨테이너로 프록시한다.
+- 그 외 요청은 Nginx 컨테이너 내부의 정적 리소스를 서빙한다.
+- 프론트엔드 정적 리소스는 Nginx 컨테이너 내부의 `/usr/share/nginx/html` 등 적절한 경로에 위치해야 한다.
+
+프록시 대상:
+
+| 요청 경로 | 대상 |
+| --- | --- |
+| `/api/*` | `http://backend:8080` |
+| `/ws/*` | `http://backend:8080` |
+| 그 외 | Nginx 정적 리소스 |
+
+### Backend
+
+Backend는 Spring Boot 애플리케이션 컨테이너로 실행한다.
+
+요구사항:
+
+- Backend 컨테이너는 외부 포트를 노출하지 않는다.
+- Nginx를 통해서만 `/api/*`, `/ws/*` 요청을 받는다.
+- Docker Compose 내부 네트워크에서 PostgreSQL, Redis, Kafka에 접근한다.
+- 내부 서비스 주소는 다음 값을 사용한다.
+
+| 대상 | 내부 주소 |
+| --- | --- |
+| Backend | `backend:8080` |
+| PostgreSQL | `db:5432` |
+| Redis | `redis:6379` |
+| Kafka | `broker:29092` |
+
+### PostgreSQL
+
+PostgreSQL은 Backend 전용 데이터베이스로 실행한다.
+
+요구사항:
+
+- 외부 포트를 노출하지 않는다.
+- Backend는 `db:5432`로 PostgreSQL에 접근한다.
+- 데이터 유지를 위해 Docker volume을 사용할 수 있다.
+
+### Redis
+
+Redis는 캐시 저장소로 실행한다.
+
+요구사항:
+
+- 외부 포트를 노출하지 않는다.
+- Backend는 `redis:6379`로 Redis에 접근한다.
+- 필요하면 Docker volume을 사용해 Redis 데이터를 유지할 수 있다.
+
+### Kafka
+
+Kafka는 이벤트 기반 알림 처리에 사용한다.
+
+요구사항:
+
+- 외부 포트를 노출하지 않는다.
+- Backend는 `broker:29092`로 Kafka에 접근한다.
+- Docker Compose 내부 네트워크에서 사용할 listener를 설정해야 한다.
+
+## 외부 포트 노출 정책
+
+외부 포트 노출은 Nginx로 제한한다.
+
+| 서비스 | 외부 포트 노출 |
+| --- | --- |
+| Nginx | `3000:80` |
+| Backend | 금지 |
+| PostgreSQL | 금지 |
+| Redis | 금지 |
+| Kafka | 금지 |
+
+## SSE 및 WebSocket 프록시 주의사항
+
+### SSE
+
+SSE 연결은 `/api/sse` 경로를 사용하므로 `/api/*` 프록시 대상에 포함된다.
+
+요구사항:
+
+- Nginx는 `/api/sse` 요청을 Backend의 `backend:8080`으로 프록시해야 한다.
+- SSE는 장시간 유지되는 HTTP 연결이므로 프록시 타임아웃 설정을 고려해야 한다.
+- 실시간 이벤트 전달을 위해 Nginx buffering 설정을 비활성화해야 할 수 있다.
+
+### WebSocket
+
+WebSocket 연결은 `/ws/*` 경로를 사용한다.
+
+요구사항:
+
+- Nginx는 `/ws/*` 요청을 Backend의 `backend:8080`으로 프록시해야 한다.
+- WebSocket upgrade를 위해 `Upgrade`, `Connection` 헤더를 전달해야 한다.
+- SockJS 하위 요청도 `/ws/*` 프록시 규칙으로 Backend에 전달되어야 한다.
+
+## 배포 아키텍처 수용 기준
+
+- 사용자는 `http://localhost:3000`으로 애플리케이션에 접근할 수 있다.
+- Nginx만 외부 포트를 노출한다.
+- `/api/*` 요청은 Nginx를 통해 Backend로 전달된다.
+- `/ws/*` 요청은 Nginx를 통해 Backend로 전달된다.
+- 그 외 요청은 Nginx가 정적 리소스로 응답한다.
+- Backend는 Docker Compose 내부 네트워크에서 PostgreSQL, Redis, Kafka에 접근한다.
+- PostgreSQL, Redis, Kafka, Backend는 외부에서 직접 접근할 수 없다.
