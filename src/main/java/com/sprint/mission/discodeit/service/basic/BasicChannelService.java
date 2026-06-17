@@ -3,6 +3,7 @@ package com.sprint.mission.discodeit.service.basic;
 import com.sprint.mission.discodeit.dto.channel.*;
 import com.sprint.mission.discodeit.dto.user.UserDto;
 import com.sprint.mission.discodeit.entity.*;
+import com.sprint.mission.discodeit.event.ChannelSseEvent;
 import com.sprint.mission.discodeit.exception.ErrorCode;
 import com.sprint.mission.discodeit.exception.channel.ChannelNotFoundException;
 import com.sprint.mission.discodeit.exception.channel.PrivateChannelUpdateException;
@@ -21,6 +22,7 @@ import com.sprint.mission.discodeit.service.ChannelService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -35,6 +37,10 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 @Slf4j
 public class BasicChannelService implements ChannelService {
+    private static final String CHANNEL_CREATED_EVENT = "channels.created";
+    private static final String CHANNEL_UPDATED_EVENT = "channels.updated";
+    private static final String CHANNEL_DELETED_EVENT = "channels.deleted";
+
     private final UserRepository userRepository;
     private final ChannelRepository channelRepository;
     private final MessageRepository messageRepository;
@@ -44,6 +50,7 @@ public class BasicChannelService implements ChannelService {
     private final UserMapper userMapper;
 
     private final JwtRegistry jwtRegistry;
+    private final ApplicationEventPublisher eventPublisher;
 
     @PreAuthorize("hasRole('CHANNEL_MANAGER')")
     @CacheEvict(value = "channels", allEntries = true)
@@ -59,7 +66,9 @@ public class BasicChannelService implements ChannelService {
         }
 
         log.info("[PUBLIC_CHANNEL_CREATE_SUCCESS] 공개 채널 생성 성공: channelId={}", channel.getId());
-        return buildSingleChannelDto(channel);
+        ChannelDto channelDto = buildSingleChannelDto(channel);
+        publishChannelSseEvent(CHANNEL_CREATED_EVENT, channelDto);
+        return channelDto;
     }
 
     @Override
@@ -83,7 +92,9 @@ public class BasicChannelService implements ChannelService {
         }
 
         log.info("[PRIVATE_CHANNEL_CREATE_SUCCESS] 비공개 채널 생성 성공: channelId={}", channel.getId());
-        return buildSingleChannelDto(channel);
+        ChannelDto channelDto = buildSingleChannelDto(channel);
+        publishChannelSseEvent(CHANNEL_CREATED_EVENT, channelDto);
+        return channelDto;
     }
 
     @Override
@@ -141,19 +152,27 @@ public class BasicChannelService implements ChannelService {
         }
 
         log.info("[CHANNEL_UPDATE_SUCCESS] 채널 정보 수정 성공: channelId={}", channelId);
-        return buildSingleChannelDto(channel);
+        ChannelDto channelDto = buildSingleChannelDto(channel);
+        publishChannelSseEvent(CHANNEL_UPDATED_EVENT, channelDto);
+        return channelDto;
     }
 
     @PreAuthorize("hasRole('CHANNEL_MANAGER')")
     @CacheEvict(value = "channels", allEntries = true)
     @Override
     public void deleteChannel(UUID channelId) {
-        findChannelOrThrow(channelId);
+        Channel channel = findChannelOrThrow(channelId);
+        ChannelDto channelDto = buildSingleChannelDto(channel);
 
         readStatusRepository.deleteAllByChannel_Id(channelId);
         messageRepository.deleteAllByChannel_Id(channelId);
         channelRepository.deleteById(channelId);
         log.info("[CHANNEL_DELETE_SUCCESS] 채널 삭제 성공: channelId={}", channelId);
+        publishChannelSseEvent(CHANNEL_DELETED_EVENT, channelDto);
+    }
+
+    private void publishChannelSseEvent(String eventName, ChannelDto channelDto) {
+        eventPublisher.publishEvent(new ChannelSseEvent(eventName, channelDto));
     }
 
     private Channel findChannelOrThrow(UUID channelId) {

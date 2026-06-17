@@ -10,6 +10,7 @@ import com.sprint.mission.discodeit.entity.Role;
 import com.sprint.mission.discodeit.entity.User;
 import com.sprint.mission.discodeit.event.BinaryContentCreatedEvent;
 import com.sprint.mission.discodeit.event.RoleUpdatedEvent;
+import com.sprint.mission.discodeit.event.UserSseEvent;
 import com.sprint.mission.discodeit.exception.ErrorCode;
 import com.sprint.mission.discodeit.exception.global.DuplicateResourceException;
 import com.sprint.mission.discodeit.exception.global.InvalidInputException;
@@ -37,8 +38,14 @@ import java.util.*;
 @RequiredArgsConstructor
 @Slf4j
 public class BasicUserService implements UserService {
+    private static final String USER_CREATED_EVENT = "users.created";
+    private static final String USER_UPDATED_EVENT = "users.updated";
+    private static final String USER_DELETED_EVENT = "users.deleted";
+
     private final UserRepository userRepository;
     private final BinaryContentRepository binaryContentRepository;
+    private final ReadStatusRepository readStatusRepository;
+    private final NotificationRepository notificationRepository;
 
     private final UserMapper userMapper;
     private final BinaryContentMapper binaryContentMapper;
@@ -79,12 +86,14 @@ public class BasicUserService implements UserService {
 
         User savedUser = userRepository.saveAndFlush(user);
 
-        if (profileImage != null && savedUser.getProfile() != null) {
-            eventPublisher.publishEvent(new BinaryContentCreatedEvent(savedUser.getProfile(), profileImage));
+        if (profileImage != null) {
+            publishBinaryContentCreatedEvent(savedUser.getProfile(), profileImage);
         }
 
         log.info("[USER_CREATE_SUCCESS] 유저 생성 성공: userId={}", savedUser.getId());
-        return userMapper.toDto(savedUser, jwtRegistry.hasActiveJwtInformationByUserId(savedUser.getId()));
+        UserDto userDto = userMapper.toDto(savedUser, jwtRegistry.hasActiveJwtInformationByUserId(savedUser.getId()));
+        publishUserSseEvent(USER_CREATED_EVENT, userDto);
+        return userDto;
     }
 
     @Override
@@ -123,13 +132,15 @@ public class BasicUserService implements UserService {
             BinaryContent profile = binaryContentMapper.toEntity(profileImage);
             user.updateProfile(profile);
 
-            userRepository.saveAndFlush(user); // 여기서 cascade로 profile도 저장되고 id 생성
+            User savedUser = userRepository.saveAndFlush(user); // 여기서 cascade로 profile도 저장되고 id 생성
 
-            eventPublisher.publishEvent(new BinaryContentCreatedEvent(profile, profileImage));
+            publishBinaryContentCreatedEvent(savedUser.getProfile(), profileImage);
         }
 
         log.info("[USER_UPDATE_SUCCESS] 유저 정보 수정 성공: userId={}", user.getId());
-        return userMapper.toDto(user, jwtRegistry.hasActiveJwtInformationByUserId(user.getId()));
+        UserDto userDto = userMapper.toDto(user, jwtRegistry.hasActiveJwtInformationByUserId(user.getId()));
+        publishUserSseEvent(USER_UPDATED_EVENT, userDto);
+        return userDto;
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -153,7 +164,9 @@ public class BasicUserService implements UserService {
         jwtRegistry.invalidateJwtInformationByUserId(user.getId());
 
         log.info("[USER_ROLE_UPDATE_SUCCESS] 유저 역할 수정 성공: userId={}, role={}", user.getId(), user.getRole());
-        return userMapper.toDto(user, jwtRegistry.hasActiveJwtInformationByUserId(user.getId()));
+        UserDto userDto = userMapper.toDto(user, jwtRegistry.hasActiveJwtInformationByUserId(user.getId()));
+        publishUserSseEvent(USER_UPDATED_EVENT, userDto);
+        return userDto;
     }
 
     @PreAuthorize("#userId == authentication.principal.id")
@@ -161,6 +174,10 @@ public class BasicUserService implements UserService {
     @CacheEvict(value = "users", allEntries = true)
     public void deleteUser(UUID userId) {
         User user = findUserOrThrow(userId);
+        UserDto userDto = userMapper.toDto(user, jwtRegistry.hasActiveJwtInformationByUserId(user.getId()));
+
+        readStatusRepository.deleteAllByUser_Id(userId);
+        notificationRepository.deleteAllByReceiver_Id(userId);
 
         BinaryContent profile = user.getProfile();
         if (profile != null && profile.getId() != null) {
@@ -169,6 +186,23 @@ public class BasicUserService implements UserService {
 
         log.info("[USER_DELETE_SUCCESS] 유저 삭제 성공: userId={}", user.getId());
         userRepository.deleteById(userId);
+        publishUserSseEvent(USER_DELETED_EVENT, userDto);
+    }
+
+    private void publishUserSseEvent(String eventName, UserDto userDto) {
+        eventPublisher.publishEvent(new UserSseEvent(eventName, userDto));
+    }
+
+    private void publishBinaryContentCreatedEvent(
+            BinaryContent binaryContent,
+            CreateBinaryContentPayloadDTO payload
+    ) {
+        if (binaryContent == null || binaryContent.getId() == null) {
+            log.warn("[BINARY_CONTENT_CREATE_EVENT_SKIP] 저장된 BinaryContent가 없어 이벤트 발행 생략");
+            return;
+        }
+
+        eventPublisher.publishEvent(new BinaryContentCreatedEvent(binaryContent, payload));
     }
 
     // === DiscodeitUserDetailsService에서 사용할 메서드 ===

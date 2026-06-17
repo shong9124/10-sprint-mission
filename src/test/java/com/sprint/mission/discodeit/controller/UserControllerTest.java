@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sprint.mission.discodeit.controller.advice.GlobalExceptionHandler;
 import com.sprint.mission.discodeit.dto.user.CreateUserRequestDTO;
 import com.sprint.mission.discodeit.dto.user.UpdateUserRequestDTO;
-import com.sprint.mission.discodeit.dto.user.UpdateUserStatusRequestDTO;
 import com.sprint.mission.discodeit.dto.user.UserDto;
+import com.sprint.mission.discodeit.entity.Role;
 import com.sprint.mission.discodeit.exception.ErrorCode;
 import com.sprint.mission.discodeit.exception.global.DuplicateResourceException;
 import com.sprint.mission.discodeit.exception.user.UserNotFoundException;
@@ -20,7 +20,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.mock.web.MockMultipartFile;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,7 +30,6 @@ import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -58,7 +56,7 @@ class UserControllerTest {
                 new CreateUserRequestDTO("test@test.com", "test", "123456789");
 
         UserDto response =
-                new UserDto(userId, "test", "test@test.com", null, null);
+                new UserDto(userId, "test", "test@test.com", null, null, Role.USER);
 
         MockMultipartFile userCreateRequest = new MockMultipartFile(
                 "userCreateRequest",
@@ -118,7 +116,7 @@ class UserControllerTest {
                 new UpdateUserRequestDTO("updatedName", null, null);
 
         UserDto response =
-                new UserDto(userId, "updatedName", "test@test.com", null, null);
+                new UserDto(userId, "updatedName", "test@test.com", null, null, Role.USER);
 
         MockMultipartFile userUpdateRequest = new MockMultipartFile(
                 "userUpdateRequest",
@@ -175,29 +173,6 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("유저 상태 수정 성공")
-    void update_user_status_success() throws Exception {
-        UUID userId = UUID.randomUUID();
-
-        UpdateUserStatusRequestDTO request =
-                new UpdateUserStatusRequestDTO(Instant.parse("2026-03-30T08:00:00Z"));
-
-        UserDto response =
-                new UserDto(userId, "test", "test@test.com", null, null);
-
-        given(userService.updateUserStatus(eq(userId), any())).willReturn(response);
-
-        mockMvc.perform(
-                        patch("/api/users/{userId}/userStatus", userId)
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(objectMapper.writeValueAsString(request))
-                )
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(userId.toString()))
-                .andExpect(jsonPath("$.username").value("test"));
-    }
-
-    @Test
     @DisplayName("유저 삭제 성공")
     void delete_user_success() throws Exception {
         UUID userId = UUID.randomUUID();
@@ -209,8 +184,8 @@ class UserControllerTest {
     @Test
     @DisplayName("전체 유저 조회 성공")
     void find_all_users_success() throws Exception {
-        UserDto user1 = new UserDto(UUID.randomUUID(), "user1", "user1@test.com", null, null);
-        UserDto user2 = new UserDto(UUID.randomUUID(), "user2", "user2@test.com", null, null);
+        UserDto user1 = new UserDto(UUID.randomUUID(), "user1", "user1@test.com", null, null, Role.USER);
+        UserDto user2 = new UserDto(UUID.randomUUID(), "user2", "user2@test.com", null, null, Role.USER);
 
         given(userService.findAll()).willReturn(List.of(user1, user2));
 
@@ -226,7 +201,7 @@ class UserControllerTest {
     @DisplayName("userId로 유저 조회 성공")
     void find_user_by_id_success() throws Exception {
         UUID userId = UUID.randomUUID();
-        UserDto response = new UserDto(userId, "test", "test@test.com", null, null);
+        UserDto response = new UserDto(userId, "test", "test@test.com", null, null, Role.USER);
 
         given(userService.findByUserId(userId)).willReturn(response);
 

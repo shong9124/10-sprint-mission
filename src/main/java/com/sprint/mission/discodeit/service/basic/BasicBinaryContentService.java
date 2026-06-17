@@ -19,6 +19,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.*;
 
@@ -28,9 +30,12 @@ import java.util.*;
 @Slf4j
 public class BasicBinaryContentService implements BinaryContentService {
 
+    private static final String BINARY_CONTENT_UPDATED_EVENT = "binaryContents.updated";
+
     private final BinaryContentRepository binaryContentRepository;
     private final BinaryContentMapper binaryContentMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final SseService sseService;
 
     @Override
     public BinaryContentDto create(CreateBinaryContentRequestDTO dto) {
@@ -93,7 +98,12 @@ public class BasicBinaryContentService implements BinaryContentService {
         BinaryContent binaryContent = binaryContentRepository.findById(binaryContentId)
                 .orElseThrow(() -> new BinaryContentNotFoundException(binaryContentId));
 
+        BinaryContentStatus previousStatus = binaryContent.getStatus();
         binaryContent.updateStatus(status);
+
+        if (isUploadCompleted(previousStatus, status)) {
+            sendBinaryContentUpdatedEventAfterCommit(binaryContentMapper.toDto(binaryContent));
+        }
     }
 
     @Override
@@ -118,6 +128,29 @@ public class BasicBinaryContentService implements BinaryContentService {
                 });
 
         return binaryContent;
+    }
+
+    private boolean isUploadCompleted(
+            BinaryContentStatus previousStatus,
+            BinaryContentStatus currentStatus
+    ) {
+        return previousStatus == BinaryContentStatus.PROCESSING
+                && (currentStatus == BinaryContentStatus.SUCCESS || currentStatus == BinaryContentStatus.FAIL);
+    }
+
+    private void sendBinaryContentUpdatedEventAfterCommit(BinaryContentDto binaryContentDto) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            sseService.broadcast(BINARY_CONTENT_UPDATED_EVENT, binaryContentDto);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+
+            @Override
+            public void afterCommit() {
+                sseService.broadcast(BINARY_CONTENT_UPDATED_EVENT, binaryContentDto);
+            }
+        });
     }
 
     private void validateCreateRequest(CreateBinaryContentRequestDTO dto) {

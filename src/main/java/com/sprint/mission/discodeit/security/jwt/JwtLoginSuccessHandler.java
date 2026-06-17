@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sprint.mission.discodeit.dto.auth.JwtDto;
 import com.sprint.mission.discodeit.dto.user.UserDto;
 import com.sprint.mission.discodeit.security.details.DiscodeitUserDetails;
+import com.sprint.mission.discodeit.service.basic.SseService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,9 +24,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class JwtLoginSuccessHandler implements AuthenticationSuccessHandler {
 
+    private static final String USER_UPDATED_EVENT = "users.updated";
+
     private final ObjectMapper objectMapper;
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtRegistry jwtRegistry;
+    private final SseService sseService;
 
     @Override
     @CacheEvict(value = "users", allEntries = true)
@@ -71,6 +75,7 @@ public class JwtLoginSuccessHandler implements AuthenticationSuccessHandler {
         );
 
         jwtRegistry.registerJwtInformation(jwtInformation);
+        sseService.broadcast(USER_UPDATED_EVENT, loginResponse);
 
         response.addCookie(refreshTokenCookie);
 

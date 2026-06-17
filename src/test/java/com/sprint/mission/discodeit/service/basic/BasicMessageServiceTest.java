@@ -8,6 +8,7 @@ import com.sprint.mission.discodeit.dto.message.UpdateMessageRequestDTO;
 import com.sprint.mission.discodeit.dto.response.PageResponse;
 import com.sprint.mission.discodeit.dto.user.UserDto;
 import com.sprint.mission.discodeit.entity.*;
+import com.sprint.mission.discodeit.event.BinaryContentCreatedEvent;
 import com.sprint.mission.discodeit.exception.channel.ChannelNotFoundException;
 import com.sprint.mission.discodeit.exception.global.InvalidInputException;
 import com.sprint.mission.discodeit.exception.message.MessageNotFoundException;
@@ -18,7 +19,7 @@ import com.sprint.mission.discodeit.mapper.PageResponseMapper;
 import com.sprint.mission.discodeit.repository.ChannelRepository;
 import com.sprint.mission.discodeit.repository.MessageRepository;
 import com.sprint.mission.discodeit.repository.UserRepository;
-import com.sprint.mission.discodeit.storage.BinaryContentStorage;
+import org.springframework.context.ApplicationEventPublisher;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -58,19 +59,17 @@ class BasicMessageServiceTest {
     @Mock
     private BinaryContentMapper binaryContentMapper;
     @Mock
-    private BinaryContentStorage binaryContentStorage;
-    @Mock
     private PageResponseMapper pageResponseMapper;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private BasicMessageService service;
 
     private User createUserWithStatus(UUID userId) {
         User user = new User("u1", "u1@test.com", "1234", null);
-        UserStatus status = new UserStatus(user, Instant.now());
 
         ReflectionTestUtils.setField(user, "id", userId);
-        ReflectionTestUtils.setField(user, "userStatus", status);
 
         return user;
     }
@@ -99,7 +98,7 @@ class BasicMessageServiceTest {
         Channel channel = createChannel(channelId);
         Message savedMessage = createMessage(messageId, user, channel, "content", List.of());
 
-        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null);
+        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null, Role.USER);
         MessageDto response = new MessageDto(messageId, null, null, "content", channelId, userDto, List.of());
 
         CreateMessageRequestDTO request =
@@ -122,7 +121,7 @@ class BasicMessageServiceTest {
         then(messageMapper).should().toDto(savedMessage);
 
         then(binaryContentMapper).shouldHaveNoInteractions();
-        then(binaryContentStorage).shouldHaveNoInteractions();
+        then(eventPublisher).should(never()).publishEvent(any());
     }
 
     @Test
@@ -149,8 +148,8 @@ class BasicMessageServiceTest {
         Message savedMessage = createMessage(messageId, user, channel, "content", List.of(attachment));
 
         BinaryContentDto binaryContentDto =
-                new BinaryContentDto(attachmentId, "file.png", size, "image/png");
-        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null);
+                new BinaryContentDto(attachmentId, "file.png", size, "image/png", BinaryContentStatus.PROCESSING);
+        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null, Role.USER);
         MessageDto response =
                 new MessageDto(messageId, null, null, "content", channelId, userDto, List.of(binaryContentDto));
 
@@ -173,7 +172,7 @@ class BasicMessageServiceTest {
         then(channelRepository).should().findById(channelId);
         then(binaryContentMapper).should().toEntity(payload);
         then(messageRepository).should().saveAndFlush(any(Message.class));
-        then(binaryContentStorage).should().put(eq(attachmentId), eq(bytes));
+        then(eventPublisher).should().publishEvent(any(BinaryContentCreatedEvent.class));
         then(messageMapper).should().toDto(savedMessage);
     }
 
@@ -238,7 +237,7 @@ class BasicMessageServiceTest {
 
         UpdateMessageRequestDTO request = new UpdateMessageRequestDTO("new content");
 
-        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null);
+        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null, Role.USER);
         MessageDto response =
                 new MessageDto(messageId, null, null, "new content", channelId, userDto, List.of());
 
@@ -312,7 +311,7 @@ class BasicMessageServiceTest {
         Pageable pageable = Pageable.ofSize(20);
         SliceImpl<Message> slice = new SliceImpl<>(List.of(message));
 
-        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null);
+        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null, Role.USER);
         MessageDto messageDto =
                 new MessageDto(messageId, null, null, "content", channelId, userDto, List.of());
 
@@ -354,7 +353,7 @@ class BasicMessageServiceTest {
         Pageable pageable = Pageable.ofSize(20);
         SliceImpl<Message> slice = new SliceImpl<>(List.of(message));
 
-        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null);
+        UserDto userDto = new UserDto(authorId, "u1", "u1@test.com", null, null, Role.USER);
         MessageDto messageDto =
                 new MessageDto(messageId, null, null, "content", channelId, userDto, List.of());
 

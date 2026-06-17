@@ -9,9 +9,11 @@ import com.sprint.mission.discodeit.event.S3UploadFailedEvent;
 import com.sprint.mission.discodeit.event.kafka.dto.MessageCreatedKafkaEvent;
 import com.sprint.mission.discodeit.event.kafka.dto.RoleUpdatedKafkaEvent;
 import com.sprint.mission.discodeit.exception.user.UserNotFoundException;
+import com.sprint.mission.discodeit.mapper.NotificationMapper;
 import com.sprint.mission.discodeit.repository.NotificationRepository;
 import com.sprint.mission.discodeit.repository.ReadStatusRepository;
 import com.sprint.mission.discodeit.repository.UserRepository;
+import com.sprint.mission.discodeit.service.basic.SseService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +21,8 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 
@@ -27,6 +31,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class NotificationRequiredTopicListener {
 
+    private static final String NOTIFICATION_CREATED_EVENT = "notifications.created";
     private static final String MESSAGE_CREATED_TOPIC = "discodeit.MessageCreatedEvent";
     private static final String ROLE_UPDATED_TOPIC = "discodeit.RoleUpdatedEvent";
     private static final String S3_UPLOAD_FAILED_TOPIC =
@@ -36,6 +41,8 @@ public class NotificationRequiredTopicListener {
     private final ReadStatusRepository readStatusRepository;
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final NotificationMapper notificationMapper;
+    private final SseService sseService;
 
     @Value("${discodeit.admin.username}")
     private String adminUsername;
@@ -62,7 +69,8 @@ public class NotificationRequiredTopicListener {
                     ))
                     .toList();
 
-            notificationRepository.saveAll(notifications);
+            notificationRepository.saveAll(notifications)
+                    .forEach(this::sendNotificationCreatedEventAfterCommit);
 
             log.info("[KAFKA_NOTIFICATION_CREATE_SUCCESS] topic={}, channelId={}, senderId={}, targetCount={}",
                     MESSAGE_CREATED_TOPIC,
@@ -104,6 +112,7 @@ public class NotificationRequiredTopicListener {
             );
 
             notificationRepository.save(notification);
+            sendNotificationCreatedEventAfterCommit(notification);
 
             log.info("[KAFKA_NOTIFICATION_CREATE_SUCCESS] topic={}, userId={}, oldRole={}, newRole={}",
                     ROLE_UPDATED_TOPIC,
@@ -154,6 +163,7 @@ public class NotificationRequiredTopicListener {
             );
 
             notificationRepository.save(notification);
+            sendNotificationCreatedEventAfterCommit(notification);
 
             log.info("[KAFKA_NOTIFICATION_CREATE_SUCCESS] topic={}, adminId={}, binaryContentId={}",
                     S3_UPLOAD_FAILED_TOPIC,
@@ -169,5 +179,28 @@ public class NotificationRequiredTopicListener {
             );
             throw new RuntimeException(e);
         }
+    }
+
+    private void sendNotificationCreatedEventAfterCommit(Notification notification) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            sendNotificationCreatedEvent(notification);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+
+            @Override
+            public void afterCommit() {
+                sendNotificationCreatedEvent(notification);
+            }
+        });
+    }
+
+    private void sendNotificationCreatedEvent(Notification notification) {
+        sseService.send(
+                List.of(notification.getReceiver().getId()),
+                NOTIFICATION_CREATED_EVENT,
+                notificationMapper.toDto(notification)
+        );
     }
 }

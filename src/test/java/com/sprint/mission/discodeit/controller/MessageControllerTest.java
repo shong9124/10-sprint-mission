@@ -7,6 +7,7 @@ import com.sprint.mission.discodeit.dto.message.MessageDto;
 import com.sprint.mission.discodeit.dto.message.UpdateMessageRequestDTO;
 import com.sprint.mission.discodeit.dto.response.PageResponse;
 import com.sprint.mission.discodeit.dto.user.UserDto;
+import com.sprint.mission.discodeit.entity.Role;
 import com.sprint.mission.discodeit.exception.ErrorCode;
 import com.sprint.mission.discodeit.exception.channel.ChannelNotFoundException;
 import com.sprint.mission.discodeit.exception.global.InvalidInputException;
@@ -63,7 +64,7 @@ class MessageControllerTest {
         CreateMessageRequestDTO request =
                 new CreateMessageRequestDTO("content", channelId, authorId);
 
-        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null);
+        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null, Role.USER);
         MessageDto response =
                 new MessageDto(messageId, null, null, "content", channelId, userDto, List.of());
 
@@ -99,7 +100,7 @@ class MessageControllerTest {
         CreateMessageRequestDTO request =
                 new CreateMessageRequestDTO("content", channelId, authorId);
 
-        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null);
+        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null, Role.USER);
         MessageDto response =
                 new MessageDto(messageId, null, null, "content", channelId, userDto, List.of());
 
@@ -193,7 +194,7 @@ class MessageControllerTest {
 
         UpdateMessageRequestDTO request = new UpdateMessageRequestDTO("updated content");
 
-        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null);
+        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null, Role.USER);
         MessageDto response =
                 new MessageDto(messageId, null, null, "updated content", channelId, userDto, List.of());
 
@@ -276,7 +277,7 @@ class MessageControllerTest {
         UUID authorId = UUID.randomUUID();
         UUID channelId = UUID.randomUUID();
 
-        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null);
+        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null, Role.USER);
         MessageDto messageDto =
                 new MessageDto(messageId, null, null, "content", channelId, userDto, List.of());
 
@@ -318,7 +319,7 @@ class MessageControllerTest {
         UUID authorId = UUID.randomUUID();
         UUID channelId = UUID.randomUUID();
 
-        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null);
+        UserDto userDto = new UserDto(authorId, "user", "test@test.com", null, null, Role.USER);
         MessageDto messageDto =
                 new MessageDto(messageId, null, null, "content", channelId, userDto, List.of());
 

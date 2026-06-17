@@ -6,14 +6,22 @@ import com.sprint.mission.discodeit.dto.user.CreateUserRequestDTO;
 import com.sprint.mission.discodeit.dto.user.UpdateUserRequestDTO;
 import com.sprint.mission.discodeit.dto.user.UserDto;
 import com.sprint.mission.discodeit.entity.BinaryContent;
+import com.sprint.mission.discodeit.entity.BinaryContentStatus;
+import com.sprint.mission.discodeit.entity.Role;
 import com.sprint.mission.discodeit.entity.User;
+import com.sprint.mission.discodeit.event.BinaryContentCreatedEvent;
+import com.sprint.mission.discodeit.event.UserSseEvent;
 import com.sprint.mission.discodeit.exception.global.DuplicateResourceException;
 import com.sprint.mission.discodeit.exception.user.UserNotFoundException;
 import com.sprint.mission.discodeit.mapper.BinaryContentMapper;
 import com.sprint.mission.discodeit.mapper.UserMapper;
 import com.sprint.mission.discodeit.repository.BinaryContentRepository;
+import com.sprint.mission.discodeit.repository.NotificationRepository;
+import com.sprint.mission.discodeit.repository.ReadStatusRepository;
 import com.sprint.mission.discodeit.repository.UserRepository;
-import com.sprint.mission.discodeit.storage.BinaryContentStorage;
+import com.sprint.mission.discodeit.security.jwt.JwtRegistry;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,15 +45,21 @@ class BasicUserServiceTest {
     @Mock
     private UserRepository userRepository;
     @Mock
-    private UserStatusRepository userStatusRepository;
-    @Mock
     private BinaryContentRepository binaryContentRepository;
     @Mock
-    private BinaryContentStorage binaryContentStorage;
+    private ReadStatusRepository readStatusRepository;
+    @Mock
+    private NotificationRepository notificationRepository;
     @Mock
     private UserMapper userMapper;
     @Mock
     private BinaryContentMapper binaryContentMapper;
+    @Mock
+    private PasswordEncoder passwordEncoder;
+    @Mock
+    private JwtRegistry jwtRegistry;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private BasicUserService basicUserService;
@@ -62,8 +76,10 @@ class BasicUserServiceTest {
 
         given(userRepository.existsByUsername("test")).willReturn(false);
         given(userRepository.existsByEmail("test@test.com")).willReturn(false);
+        given(passwordEncoder.encode("1234")).willReturn("encoded");
         given(userRepository.saveAndFlush(any(User.class))).willReturn(savedUser);
-        given(userMapper.toDto(savedUser)).willReturn(response);
+        given(jwtRegistry.hasActiveJwtInformationByUserId(savedUser.getId())).willReturn(false);
+        given(userMapper.toDto(savedUser, false)).willReturn(response);
 
         // when
         UserDto result = basicUserService.createUser(request, null);
@@ -74,11 +90,12 @@ class BasicUserServiceTest {
         then(userRepository).should().existsByUsername("test");
         then(userRepository).should().existsByEmail("test@test.com");
         then(userRepository).should().saveAndFlush(any(User.class));
-        then(userMapper).should().toDto(savedUser);
+        then(userMapper).should().toDto(savedUser, false);
+        then(eventPublisher).should().publishEvent(any(UserSseEvent.class));
 
         // 프로필 이미지가 없으므로 호출되면 안 됨
         then(binaryContentMapper).shouldHaveNoInteractions();
-        then(binaryContentStorage).should(never()).put(any(), any());
+        then(eventPublisher).should(never()).publishEvent(any(BinaryContentCreatedEvent.class));
     }
 
     @Test
@@ -97,14 +114,16 @@ class BasicUserServiceTest {
         BinaryContent bc = new BinaryContent("jpg", "test", size);
         User savedUser = new User("test", "test@test.com", "1234", bc);
 
-        BinaryContentDto profileDto = new BinaryContentDto(null, "test", size, "jpg");
-        UserDto response = new UserDto(null, "test", "test@test.com", profileDto, null);
+        BinaryContentDto profileDto = new BinaryContentDto(null, "test", size, "jpg", BinaryContentStatus.PROCESSING);
+        UserDto response = new UserDto(null, "test", "test@test.com", profileDto, null, Role.USER);
 
         given(userRepository.existsByUsername("test")).willReturn(false);
         given(userRepository.existsByEmail("test@test.com")).willReturn(false);
+        given(passwordEncoder.encode("1234")).willReturn("encoded");
         given(binaryContentMapper.toEntity(profile)).willReturn(bc);
         given(userRepository.saveAndFlush(any(User.class))).willReturn(savedUser);
-        given(userMapper.toDto(savedUser)).willReturn(response);
+        given(jwtRegistry.hasActiveJwtInformationByUserId(savedUser.getId())).willReturn(false);
+        given(userMapper.toDto(savedUser, false)).willReturn(response);
 
         // when
         UserDto result = basicUserService.createUser(request, profile);
@@ -115,10 +134,11 @@ class BasicUserServiceTest {
         then(userRepository).should().existsByUsername("test");
         then(userRepository).should().existsByEmail("test@test.com");
         then(userRepository).should().saveAndFlush(any(User.class));
-        then(userMapper).should().toDto(savedUser);
+        then(userMapper).should().toDto(savedUser, false);
 
         then(binaryContentMapper).should().toEntity(profile);
-        then(binaryContentStorage).should().put(any(), eq(profile.bytes()));
+        then(eventPublisher).should().publishEvent(any(BinaryContentCreatedEvent.class));
+        then(eventPublisher).should().publishEvent(any(UserSseEvent.class));
     }
 
     @Test
@@ -172,11 +192,12 @@ class BasicUserServiceTest {
         User user = new User("test", "test@test.com", "1234", null);
         // 결과 DTO
         UserDto response =
-                new UserDto(null, "update", "test@test.com", null, null);
+                new UserDto(null, "update", "test@test.com", null, false, Role.USER);
 
         given(userRepository.findById(userId)).willReturn(Optional.of(user));
         given(userRepository.existsByUsername("update")).willReturn(false);
-        given(userMapper.toDto(user)).willReturn(response);
+        given(jwtRegistry.hasActiveJwtInformationByUserId(user.getId())).willReturn(false);
+        given(userMapper.toDto(user, false)).willReturn(response);
 
         // when
         UserDto result = basicUserService.updateUserInfo(userId, request, null);
@@ -193,7 +214,7 @@ class BasicUserServiceTest {
 
         // 프로필 관련 로직 안 타야 함
         then(binaryContentMapper).shouldHaveNoInteractions();
-        then(binaryContentStorage).should(never()).put(any(), any());
+        then(eventPublisher).should(never()).publishEvent(any(BinaryContentCreatedEvent.class));
     }
 
     @Test
@@ -208,11 +229,12 @@ class BasicUserServiceTest {
         User user = new User("test", "test@test.com", "1234", null);
         // 결과 DTO
         UserDto response =
-                new UserDto(null, "test", "update@test.com", null, null);
+                new UserDto(null, "test", "update@test.com", null, false, Role.USER);
 
         given(userRepository.findById(userId)).willReturn(Optional.of(user));
         given(userRepository.existsByEmail("update@test.com")).willReturn(false);
-        given(userMapper.toDto(user)).willReturn(response);
+        given(jwtRegistry.hasActiveJwtInformationByUserId(user.getId())).willReturn(false);
+        given(userMapper.toDto(user, false)).willReturn(response);
 
         // when
         UserDto result = basicUserService.updateUserInfo(userId, request, null);
@@ -229,7 +251,7 @@ class BasicUserServiceTest {
 
         // 프로필 관련 로직 안 타야 함
         then(binaryContentMapper).shouldHaveNoInteractions();
-        then(binaryContentStorage).should(never()).put(any(), any());
+        then(eventPublisher).should(never()).publishEvent(any(BinaryContentCreatedEvent.class));
     }
 
     @Test
@@ -247,22 +269,21 @@ class BasicUserServiceTest {
                 new CreateBinaryContentPayloadDTO(bytes, "jpg", "test", size);
 
         BinaryContent bc = new BinaryContent("jpg", "test", size);
-        BinaryContent savedProfile = bc; // 단순화: save 결과도 같은 객체로 가정
 
-        BinaryContentDto profileDto = new BinaryContentDto(null, "test", size, "jpg");
+        BinaryContentDto profileDto = new BinaryContentDto(null, "test", size, "jpg", BinaryContentStatus.PROCESSING);
 
         // 기존 유저
         User user = new User("test", "test@test.com", "1234", null);
 
         // 결과 DTO
         UserDto response =
-                new UserDto(null, "test", "test@test.com", profileDto, null);
+                new UserDto(null, "test", "test@test.com", profileDto, false, Role.USER);
 
         given(userRepository.findById(userId)).willReturn(Optional.of(user));
         given(binaryContentMapper.toEntity(profile)).willReturn(bc);
-        given(binaryContentRepository.save(bc)).willReturn(savedProfile);
         given(userRepository.saveAndFlush(user)).willReturn(user);
-        given(userMapper.toDto(user)).willReturn(response);
+        given(jwtRegistry.hasActiveJwtInformationByUserId(user.getId())).willReturn(false);
+        given(userMapper.toDto(user, false)).willReturn(response);
 
         // when
         UserDto result = basicUserService.updateUserInfo(userId, request, profile);
@@ -273,13 +294,13 @@ class BasicUserServiceTest {
         // 핵심 검증
         then(userRepository).should().findById(userId);
         then(binaryContentMapper).should().toEntity(profile);
-        then(binaryContentRepository).should().save(bc);
         then(userRepository).should().saveAndFlush(user);
-        then(binaryContentStorage).should().put(any(), eq(profile.bytes()));
-        then(userMapper).should().toDto(user);
+        then(eventPublisher).should().publishEvent(any(BinaryContentCreatedEvent.class));
+        then(eventPublisher).should().publishEvent(any(UserSseEvent.class));
+        then(userMapper).should().toDto(user, false);
 
         // 실제로 값이 바뀌었는지 확인
-        assertThat(user.getProfile()).isEqualTo(savedProfile);
+        assertThat(user.getProfile()).isEqualTo(bc);
 
         // username / email 관련 로직은 안 타야 함
         then(userRepository).should(never()).existsByUsername(any());
@@ -343,15 +364,21 @@ class BasicUserServiceTest {
         // given
         UUID userId = UUID.randomUUID();
         User user = new User("test", "test@test.com", "1234", null);
+        UserDto response = new UserDto(userId, "test", "test@test.com", null, false, Role.USER);
 
         given(userRepository.findById(userId)).willReturn(Optional.of(user));
+        given(jwtRegistry.hasActiveJwtInformationByUserId(user.getId())).willReturn(false);
+        given(userMapper.toDto(user, false)).willReturn(response);
 
         // when
         basicUserService.deleteUser(userId);
 
         // then
         then(userRepository).should().findById(userId);
+        then(readStatusRepository).should().deleteAllByUser_Id(userId);
+        then(notificationRepository).should().deleteAllByReceiver_Id(userId);
         then(userRepository).should().deleteById(userId);
+        then(eventPublisher).should().publishEvent(any(UserSseEvent.class));
         // 프로필이 없는 경우라
         then(binaryContentRepository).shouldHaveNoInteractions();
     }
@@ -366,8 +393,11 @@ class BasicUserServiceTest {
         BinaryContent profile = mock(BinaryContent.class);
         given(profile.getId()).willReturn(profileId);
         User user = new User("test", "test@test.com", "1234", profile);
+        UserDto response = new UserDto(userId, "test", "test@test.com", null, false, Role.USER);
 
         given(userRepository.findById(userId)).willReturn(Optional.of(user));
+        given(jwtRegistry.hasActiveJwtInformationByUserId(user.getId())).willReturn(false);
+        given(userMapper.toDto(user, false)).willReturn(response);
 
         // when
         basicUserService.deleteUser(userId);
